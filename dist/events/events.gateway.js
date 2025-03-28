@@ -32,15 +32,6 @@ let EventsGateway = class EventsGateway {
     }
     async handleDisconnect(client) {
         console.log(`Client disconnected: ${client.id}`);
-        const pendingMessages = await this.getPendingMessages();
-        for (const [messageId, message] of Object.entries(pendingMessages)) {
-            if (message.clientId === client.id) {
-                if (message.jobId) {
-                    await this.retryQueue.remove(message.jobId);
-                }
-                await this.removePendingMessage(messageId);
-            }
-        }
     }
     async handlePlayCard(client, payload) {
         console.log(`Player ${client.id} played card: ${payload.suit} - ${payload.value}`);
@@ -54,7 +45,7 @@ let EventsGateway = class EventsGateway {
             await this.removePendingMessage(messageId);
             return;
         }
-        await this.sendCardPlayed(client, payload, retries);
+        await this.sendCardPlayed(client, payload);
     }
     async getPendingMessages() {
         const messages = await this.cacheManager.get(this.PENDING_MESSAGES_KEY);
@@ -77,7 +68,7 @@ let EventsGateway = class EventsGateway {
         delete messages[messageId];
         await this.savePendingMessages(messages);
     }
-    async sendCardPlayed(client, payload, retries = 0) {
+    async sendCardPlayed(client, payload) {
         console.log('disparou aqui ?');
         const messageId = `${client.id}-${payload.suit}-${payload.value}`;
         const ackCallback = async (ack) => {
@@ -98,7 +89,6 @@ let EventsGateway = class EventsGateway {
         const job = await this.retryQueue.add('retryCardPlayed', {
             clientId: client.id,
             payload,
-            retries,
         }, {
             delay: this.RETRY_DELAY_MS,
             jobId: messageId,
@@ -111,7 +101,6 @@ let EventsGateway = class EventsGateway {
         await this.addPendingMessage(messageId, {
             clientId: client.id,
             payload,
-            retries,
             jobId: job.id,
         });
     }

@@ -17,7 +17,6 @@ type CardPayload = { value: number; suit: string };
 interface PendingMessage {
   clientId: string;
   payload: CardPayload;
-  retries: number;
   jobId?: string;
 }
 
@@ -64,7 +63,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    await this.sendCardPlayed(client, payload, retries);
+    await this.sendCardPlayed(client, payload);
   }
 
   private async getPendingMessages(): Promise<Record<string, PendingMessage>> {
@@ -91,7 +90,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     await this.savePendingMessages(messages);
   }
 
-  private async sendCardPlayed(client: Socket, payload: CardPayload, retries = 0) {
+  public async sendCardPlayed(client: Socket, payload: CardPayload) {
     console.log('disparou aqui ?')
     const messageId = `${client.id}-${payload.suit}-${payload.value}`;
 
@@ -118,7 +117,6 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         {
           clientId: client.id,
           payload,
-          retries,
         },
         {
           delay: this.RETRY_DELAY_MS,
@@ -134,7 +132,6 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     await this.addPendingMessage(messageId, {
       clientId: client.id,
       payload,
-      retries,
       jobId: job.id,
     });
   }

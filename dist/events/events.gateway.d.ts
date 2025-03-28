@@ -25,6 +25,6 @@ export declare class EventsGateway implements OnGatewayConnection, OnGatewayDisc
     private savePendingMessages;
     private addPendingMessage;
     private removePendingMessage;
-    private sendCardPlayed;
+    sendCardPlayed(client: Socket, payload: CardPayload): Promise<void>;
 }
 export {};

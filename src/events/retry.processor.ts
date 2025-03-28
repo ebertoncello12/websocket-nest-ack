@@ -11,13 +11,20 @@ export class RetryProcessor extends WorkerHost {
     }
 
     async process(job: Job<{ clientId: string; payload: any; retries: number }>) {
-        const { clientId, payload, retries } = job.data;
+        const { clientId, payload } = job.data;
 
-        // Aqui você precisaria ter acesso ao socket do cliente
-        // Como não temos isso diretamente, você pode precisar ajustar sua abordagem
-        // Vou manter a lógica similar ao seu código original
-       // por enquanto vai fazer porra nnehuma
-        console.log('disparou a fila ?')
-        //Todo: Fazer o reprocessamento das mensagens
+        console.log(`Processando retry para cliente ${clientId}`);
+
+        // Verifica se o cliente ainda está conectado
+        const client = this.eventsGateway.server.sockets.sockets.get(clientId);
+
+        if (!client) {
+            console.log(`Cliente ${clientId} não está mais conectado. Descarte a mensagem.`);
+            return;
+        }
+
+        await this.eventsGateway.sendCardPlayed(client, payload);
+
+        console.log(`Mensagem reenviada para cliente ${clientId}`);
     }
 }
