@@ -9,12 +9,19 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.EventsModule = void 0;
 const common_1 = require("@nestjs/common");
 const events_gateway_1 = require("./events.gateway");
+const retry_processor_1 = require("./retry.processor");
+const bullmq_1 = require("@nestjs/bullmq");
 let EventsModule = class EventsModule {
 };
 exports.EventsModule = EventsModule;
 exports.EventsModule = EventsModule = __decorate([
     (0, common_1.Module)({
-        providers: [events_gateway_1.EventsGateway],
+        imports: [
+            bullmq_1.BullModule.registerQueue({
+                name: 'retryQueue',
+            }),
+        ],
+        providers: [events_gateway_1.EventsGateway, retry_processor_1.RetryProcessor],
     })
 ], EventsModule);
 //# sourceMappingURL=events.module.js.map

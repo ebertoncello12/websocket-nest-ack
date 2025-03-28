@@ -35,11 +35,21 @@ exports.AppModule = AppModule = __decorate([
                 },
                 isGlobal: true,
             }),
-            bullmq_1.BullModule.forRoot({
-                connection: {
-                    host: "localhost",
-                    port: 6379,
-                },
+            bullmq_1.BullModule.forRootAsync({
+                useFactory: () => ({
+                    connection: {
+                        host: process.env.REDIS_HOST || "localhost",
+                        port: Number(process.env.REDIS_PORT) || 6379,
+                        password: process.env.REDIS_PASSWORD || "password",
+                    },
+                    defaultJobOptions: {
+                        attempts: 3,
+                        backoff: {
+                            type: 'fixed',
+                            delay: 500,
+                        },
+                    },
+                }),
             }),
         ],
     })

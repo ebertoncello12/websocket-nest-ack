@@ -17,31 +17,76 @@ const cache_manager_1 = require("@nestjs/cache-manager");
 const common_1 = require("@nestjs/common");
 const websockets_1 = require("@nestjs/websockets");
 const socket_io_1 = require("socket.io");
+const bullmq_1 = require("bullmq");
+const bullmq_2 = require("@nestjs/bullmq");
 let EventsGateway = class EventsGateway {
-    constructor(cacheManager) {
+    constructor(cacheManager, retryQueue) {
         this.cacheManager = cacheManager;
+        this.retryQueue = retryQueue;
         this.MAX_RETRIES = 3;
         this.RETRY_DELAY_MS = 500;
-        this.pendingMessages = new Map();
+        this.PENDING_MESSAGES_KEY = 'pending_messages';
     }
-    handleConnection(client, ...args) {
+    async handleConnection(client, ...args) {
         console.log(`Client connected: ${client.id}`);
     }
-    handleDisconnect(client) {
+    async handleDisconnect(client) {
         console.log(`Client disconnected: ${client.id}`);
+        const pendingMessages = await this.getPendingMessages();
+        for (const [messageId, message] of Object.entries(pendingMessages)) {
+            if (message.clientId === client.id) {
+                if (message.jobId) {
+                    await this.retryQueue.remove(message.jobId);
+                }
+                await this.removePendingMessage(messageId);
+            }
+        }
     }
-    handlePlayCard(client, payload) {
+    async handlePlayCard(client, payload) {
         console.log(`Player ${client.id} played card: ${payload.suit} - ${payload.value}`);
-        this.sendCardPlayed(client, payload);
+        await this.sendCardPlayed(client, payload);
     }
-    sendCardPlayed(client, payload, retries = 0) {
+    async retryCardPlayed(clientId, payload, retries) {
+        const client = this.server.sockets.sockets.get(clientId);
+        if (!client) {
+            console.log(`Client ${clientId} not found, removing from pending`);
+            const messageId = `${clientId}-${payload.suit}-${payload.value}`;
+            await this.removePendingMessage(messageId);
+            return;
+        }
+        await this.sendCardPlayed(client, payload, retries);
+    }
+    async getPendingMessages() {
+        const messages = await this.cacheManager.get(this.PENDING_MESSAGES_KEY);
+        return messages || {};
+    }
+    async savePendingMessages(messages) {
+        await this.cacheManager.set(this.PENDING_MESSAGES_KEY, messages);
+    }
+    async addPendingMessage(messageId, message) {
+        const messages = await this.getPendingMessages();
+        messages[messageId] = message;
+        await this.savePendingMessages(messages);
+    }
+    async removePendingMessage(messageId) {
+        var _a;
+        const messages = await this.getPendingMessages();
+        if ((_a = messages[messageId]) === null || _a === void 0 ? void 0 : _a.jobId) {
+            await this.retryQueue.remove(messages[messageId].jobId);
+        }
+        delete messages[messageId];
+        await this.savePendingMessages(messages);
+    }
+    async sendCardPlayed(client, payload, retries = 0) {
+        console.log('disparou aqui ?');
         const messageId = `${client.id}-${payload.suit}-${payload.value}`;
-        const ackCallback = (ack) => {
-            const entry = this.pendingMessages.get(messageId);
+        const ackCallback = async (ack) => {
+            const messages = await this.getPendingMessages();
+            console.log(messages);
+            const entry = messages[messageId];
             if (!entry)
                 return;
-            clearTimeout(entry.timeoutId);
-            this.pendingMessages.delete(messageId);
+            await this.removePendingMessage(messageId);
             if (ack && ack.success) {
                 console.log(`Player ${client.id} acknowledged card play`);
             }
@@ -50,24 +95,24 @@ let EventsGateway = class EventsGateway {
             }
         };
         client.emit("cardPlayed", payload, ackCallback);
-        const timeoutId = setTimeout(() => {
-            const current = this.pendingMessages.get(messageId);
-            if (!current)
-                return;
-            if (current.retries < this.MAX_RETRIES) {
-                console.log(`Retrying cardPlayed to ${client.id}, attempt ${current.retries + 1}`);
-                this.sendCardPlayed(client, payload, current.retries + 1);
-            }
-            else {
-                console.log(`Player ${client.id} did not acknowledge after ${this.MAX_RETRIES} retries.`);
-                this.pendingMessages.delete(messageId);
-            }
-        }, this.RETRY_DELAY_MS);
-        this.pendingMessages.set(messageId, {
-            client,
+        const job = await this.retryQueue.add('retryCardPlayed', {
+            clientId: client.id,
             payload,
             retries,
-            timeoutId,
+        }, {
+            delay: this.RETRY_DELAY_MS,
+            jobId: messageId,
+            attempts: this.MAX_RETRIES,
+            backoff: {
+                type: 'fixed',
+                delay: this.RETRY_DELAY_MS,
+            },
+        });
+        await this.addPendingMessage(messageId, {
+            clientId: client.id,
+            payload,
+            retries,
+            jobId: job.id,
         });
     }
 };
@@ -80,7 +125,7 @@ __decorate([
     (0, websockets_1.SubscribeMessage)("playCard"),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [socket_io_1.Socket, Object]),
-    __metadata("design:returntype", void 0)
+    __metadata("design:returntype", Promise)
 ], EventsGateway.prototype, "handlePlayCard", null);
 exports.EventsGateway = EventsGateway = __decorate([
     (0, websockets_1.WebSocketGateway)({
@@ -89,6 +134,7 @@ exports.EventsGateway = EventsGateway = __decorate([
         },
     }),
     __param(0, (0, common_1.Inject)(cache_manager_1.CACHE_MANAGER)),
-    __metadata("design:paramtypes", [Object])
+    __param(1, (0, bullmq_2.InjectQueue)('retryQueue')),
+    __metadata("design:paramtypes", [Object, bullmq_1.Queue])
 ], EventsGateway);
 //# sourceMappingURL=events.gateway.js.map

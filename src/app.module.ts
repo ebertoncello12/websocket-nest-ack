@@ -24,11 +24,21 @@ import { BullModule } from "@nestjs/bullmq";
       },
       isGlobal: true,
     }),
-    BullModule.forRoot({
-      connection: {
-        host: "localhost",
-        port: 6379,
-      },
+    BullModule.forRootAsync({
+      useFactory: () => ({
+        connection: {
+          host: process.env.REDIS_HOST || "localhost",
+          port: Number(process.env.REDIS_PORT) || 6379,
+          password: process.env.REDIS_PASSWORD || "password",
+        },
+        defaultJobOptions: {
+          attempts: 3,
+          backoff: {
+            type: 'fixed',
+            delay: 500,
+          },
+        },
+      }),
     }),
   ],
 })

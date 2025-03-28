@@ -9,14 +9,16 @@ import {
 } from "@nestjs/websockets";
 import { Cache } from 'cache-manager';
 import { Server, Socket } from "socket.io";
+import { Queue } from 'bullmq';
+import { InjectQueue } from '@nestjs/bullmq';
 
 type CardPayload = { value: number; suit: string };
 
 interface PendingMessage {
-  client: Socket;
+  clientId: string;
   payload: CardPayload;
   retries: number;
-  timeoutId: NodeJS.Timeout;
+  jobId?: string;
 }
 
 @WebSocketGateway({
@@ -27,38 +29,79 @@ interface PendingMessage {
 export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
 
-  constructor(@Inject(CACHE_MANAGER) private cacheManager: Cache,) {}
-
-  handleConnection(client: Socket, ...args: any[]) {
-    console.log(`Client connected: ${client.id}`);
-  }
-
-  handleDisconnect(client: Socket) {
-    console.log(`Client disconnected: ${client.id}`);
-  }
+  constructor(
+      @Inject(CACHE_MANAGER) private cacheManager: Cache,
+      @InjectQueue('retryQueue') private retryQueue: Queue
+  ) {}
 
   MAX_RETRIES = 3;
   RETRY_DELAY_MS = 500;
+  PENDING_MESSAGES_KEY = 'pending_messages';
 
-  private pendingMessages: Map<string, PendingMessage> = new Map();
-
-  @SubscribeMessage("playCard")
-  handlePlayCard(client: Socket, payload: { value: number; suit: string }) {
-    console.log(
-      `Player ${client.id} played card: ${payload.suit} - ${payload.value}`
-    );
-    this.sendCardPlayed(client, payload);
+  async handleConnection(client: Socket, ...args: any[]) {
+    console.log(`Client connected: ${client.id}`);
   }
 
-  private sendCardPlayed(client: Socket, payload: CardPayload, retries = 0) {
+  async handleDisconnect(client: Socket) {
+    console.log(`Client disconnected: ${client.id}`);
+  }
+
+  @SubscribeMessage("playCard")
+  async handlePlayCard(client: Socket, payload: { value: number; suit: string }) {
+    console.log(
+        `Player ${client.id} played card: ${payload.suit} - ${payload.value}`
+    );
+    await this.sendCardPlayed(client, payload);
+  }
+
+  // Novo método para ser chamado pelo worker
+  async retryCardPlayed(clientId: string, payload: CardPayload, retries: number) {
+    const client = this.server.sockets.sockets.get(clientId);
+    if (!client) {
+      console.log(`Client ${clientId} not found, removing from pending`);
+      const messageId = `${clientId}-${payload.suit}-${payload.value}`;
+      await this.removePendingMessage(messageId);
+      return;
+    }
+
+    await this.sendCardPlayed(client, payload, retries);
+  }
+
+  private async getPendingMessages(): Promise<Record<string, PendingMessage>> {
+    const messages = await this.cacheManager.get<Record<string, PendingMessage>>(this.PENDING_MESSAGES_KEY);
+    return messages || {};
+  }
+
+  private async savePendingMessages(messages: Record<string, PendingMessage>): Promise<void> {
+    await this.cacheManager.set(this.PENDING_MESSAGES_KEY, messages);
+  }
+
+  private async addPendingMessage(messageId: string, message: PendingMessage): Promise<void> {
+    const messages = await this.getPendingMessages();
+    messages[messageId] = message;
+    await this.savePendingMessages(messages);
+  }
+
+  private async removePendingMessage(messageId: string): Promise<void> {
+    const messages = await this.getPendingMessages();
+    if (messages[messageId]?.jobId) {
+      await this.retryQueue.remove(messages[messageId].jobId);
+    }
+    delete messages[messageId];
+    await this.savePendingMessages(messages);
+  }
+
+  private async sendCardPlayed(client: Socket, payload: CardPayload, retries = 0) {
+    console.log('disparou aqui ?')
     const messageId = `${client.id}-${payload.suit}-${payload.value}`;
 
-    const ackCallback = (ack: any) => {
-      const entry = this.pendingMessages.get(messageId);
+    const ackCallback = async (ack: any) => {
+      const messages = await this.getPendingMessages();
+      console.log(messages);
+      const entry = messages[messageId];
       if (!entry) return;
 
-      clearTimeout(entry.timeoutId);
-      this.pendingMessages.delete(messageId);
+      await this.removePendingMessage(messageId);
 
       if (ack && ack.success) {
         console.log(`Player ${client.id} acknowledged card play`);
@@ -67,33 +110,32 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
     };
 
-    // Emit with ACK callback
     client.emit("cardPlayed", payload, ackCallback);
 
-    // Schedule retry if no ack in time
-    const timeoutId = setTimeout(() => {
-      const current = this.pendingMessages.get(messageId);
-      if (!current) return;
+    // Agora usamos o BullMQ para lidar com os retries
+    const job = await this.retryQueue.add(
+        'retryCardPlayed',
+        {
+          clientId: client.id,
+          payload,
+          retries,
+        },
+        {
+          delay: this.RETRY_DELAY_MS,
+          jobId: messageId,
+          attempts: this.MAX_RETRIES,
+          backoff: {
+            type: 'fixed',
+            delay: this.RETRY_DELAY_MS,
+          },
+        }
+    );
 
-      if (current.retries < this.MAX_RETRIES) {
-        console.log(
-          `Retrying cardPlayed to ${client.id}, attempt ${current.retries + 1}`
-        );
-        this.sendCardPlayed(client, payload, current.retries + 1);
-      } else {
-        console.log(
-          `Player ${client.id} did not acknowledge after ${this.MAX_RETRIES} retries.`
-        );
-        this.pendingMessages.delete(messageId);
-      }
-    }, this.RETRY_DELAY_MS);
-
-    // Track the pending message
-    this.pendingMessages.set(messageId, {
-      client,
+    await this.addPendingMessage(messageId, {
+      clientId: client.id,
       payload,
       retries,
-      timeoutId,
+      jobId: job.id,
     });
   }
 }
