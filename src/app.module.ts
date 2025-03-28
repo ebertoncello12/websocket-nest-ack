@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { EventsModule } from "./events/events.module";
 import { CacheModule } from "@nestjs/cache-manager";
 import { redisStore } from "cache-manager-redis-yet";
+import { BullModule } from "@nestjs/bullmq";
 
 @Module({
   imports: [
@@ -22,6 +23,12 @@ import { redisStore } from "cache-manager-redis-yet";
         };
       },
       isGlobal: true,
+    }),
+    BullModule.forRoot({
+      connection: {
+        host: "localhost",
+        port: 6379,
+      },
     }),
   ],
 })

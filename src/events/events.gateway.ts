@@ -1,3 +1,5 @@
+import { CACHE_MANAGER } from "@nestjs/cache-manager";
+import { Inject } from "@nestjs/common";
 import {
   OnGatewayConnection,
   OnGatewayDisconnect,
@@ -5,6 +7,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from "@nestjs/websockets";
+import { Cache } from 'cache-manager';
 import { Server, Socket } from "socket.io";
 
 type CardPayload = { value: number; suit: string };
@@ -23,6 +26,8 @@ interface PendingMessage {
 })
 export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
+
+  constructor(@Inject(CACHE_MANAGER) private cacheManager: Cache,) {}
 
   handleConnection(client: Socket, ...args: any[]) {
     console.log(`Client connected: ${client.id}`);

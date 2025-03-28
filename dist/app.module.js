@@ -11,6 +11,7 @@ const common_1 = require("@nestjs/common");
 const events_module_1 = require("./events/events.module");
 const cache_manager_1 = require("@nestjs/cache-manager");
 const cache_manager_redis_yet_1 = require("cache-manager-redis-yet");
+const bullmq_1 = require("@nestjs/bullmq");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -33,6 +34,12 @@ exports.AppModule = AppModule = __decorate([
                     };
                 },
                 isGlobal: true,
+            }),
+            bullmq_1.BullModule.forRoot({
+                connection: {
+                    host: "localhost",
+                    port: 6379,
+                },
             }),
         ],
     })
