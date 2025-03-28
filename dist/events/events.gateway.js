@@ -15,49 +15,59 @@ const common_1 = require("@nestjs/common");
 const socket_io_1 = require("socket.io");
 let EventsGateway = class EventsGateway {
     constructor() {
-        this.logger = new common_1.Logger('EventsGateway');
+        this.logger = new common_1.Logger("EventsGateway");
         this.tablePlayers = new Map();
-    }
-    afterInit(server) {
-        this.logger.log('WebSocket Gateway initialized');
+        this.MAX_RETRIES = 3;
+        this.RETRY_DELAY_MS = 500;
+        this.pendingMessages = new Map();
     }
     handleConnection(client, ...args) {
-        this.logger.log(`Client connected: ${client.id}`);
+        console.log(`Client connected: ${client.id}`);
     }
     handleDisconnect(client) {
-        this.logger.log(`Client disconnected: ${client.id}`);
+        console.log(`Client disconnected: ${client.id}`);
         this.tablePlayers.forEach((players, tableId) => {
             players.delete(client);
         });
     }
-    handleJoinTable(client, payload) {
-        if (!this.tablePlayers.has(payload.tableId)) {
-            this.tablePlayers.set(payload.tableId, new Set());
-        }
-        this.tablePlayers.get(payload.tableId).add(client);
-        this.logger.log(`Player ${client.id} joined table ${payload.tableId}`);
+    handlePlayCard(client, payload) {
+        console.log(`Player ${client.id} played card: ${payload.suit} - ${payload.value}`);
+        this.sendCardPlayed(client, payload);
     }
-    async handlePlayCard(client, payload) {
-        this.logger.log(`Player ${payload.playerId} played card: ${JSON.stringify(payload.card)}`);
-        const tablePlayers = this.tablePlayers.get(payload.tableId) || new Set();
-        const gameState = {
-            type: 'cardPlayed',
-            playerId: payload.playerId,
-            card: payload.card,
-            timestamp: Date.now(),
-            requestId: `${payload.playerId}-${Date.now()}`
+    sendCardPlayed(client, payload, retries = 0) {
+        const messageId = `${client.id}-${payload.suit}-${payload.value}`;
+        const ackCallback = (ack) => {
+            const entry = this.pendingMessages.get(messageId);
+            if (!entry)
+                return;
+            clearTimeout(entry.timeoutId);
+            this.pendingMessages.delete(messageId);
+            if (ack && ack.success) {
+                console.log(`Player ${client.id} acknowledged card play`);
+            }
+            else {
+                console.log(`Player ${client.id} sent invalid ack. Not retrying.`);
+            }
         };
-        const acknowledgments = new Set();
-        tablePlayers.forEach((player) => {
-            player.emit('gameUpdate', gameState, (ack) => {
-                if (ack && ack.success) {
-                    acknowledgments.add(player.id);
-                    this.logger.log(`Player ${player.id} acknowledged card play`);
-                    if (acknowledgments.size === tablePlayers.size) {
-                        this.logger.log('All players acknowledged the card play');
-                    }
-                }
-            });
+        client.emit("cardPlayed", payload, ackCallback);
+        const timeoutId = setTimeout(() => {
+            const current = this.pendingMessages.get(messageId);
+            if (!current)
+                return;
+            if (current.retries < this.MAX_RETRIES) {
+                console.log(`Retrying cardPlayed to ${client.id}, attempt ${current.retries + 1}`);
+                this.sendCardPlayed(client, payload, current.retries + 1);
+            }
+            else {
+                console.log(`Player ${client.id} did not acknowledge after ${this.MAX_RETRIES} retries.`);
+                this.pendingMessages.delete(messageId);
+            }
+        }, this.RETRY_DELAY_MS);
+        this.pendingMessages.set(messageId, {
+            client,
+            payload,
+            retries,
+            timeoutId,
         });
     }
 };
@@ -67,21 +77,15 @@ __decorate([
     __metadata("design:type", socket_io_1.Server)
 ], EventsGateway.prototype, "server", void 0);
 __decorate([
-    (0, websockets_1.SubscribeMessage)('joinTable'),
+    (0, websockets_1.SubscribeMessage)("playCard"),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [socket_io_1.Socket, Object]),
     __metadata("design:returntype", void 0)
-], EventsGateway.prototype, "handleJoinTable", null);
-__decorate([
-    (0, websockets_1.SubscribeMessage)('playCard'),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", [socket_io_1.Socket, Object]),
-    __metadata("design:returntype", Promise)
 ], EventsGateway.prototype, "handlePlayCard", null);
 exports.EventsGateway = EventsGateway = __decorate([
     (0, websockets_1.WebSocketGateway)({
         cors: {
-            origin: '*',
+            origin: "*",
         },
     })
 ], EventsGateway);

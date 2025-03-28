@@ -1,23 +1,17 @@
-import { OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit } from '@nestjs/websockets';
-import { Server, Socket } from 'socket.io';
-interface PlayCardPayload {
-    tableId: string;
-    playerId: string;
-    card: {
-        suit: string;
-        value: number;
-    };
-}
-export declare class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
+import { OnGatewayConnection, OnGatewayDisconnect } from "@nestjs/websockets";
+import { Server, Socket } from "socket.io";
+export declare class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private logger;
     private tablePlayers;
     server: Server;
-    afterInit(server: Server): void;
     handleConnection(client: Socket, ...args: any[]): void;
     handleDisconnect(client: Socket): void;
-    handleJoinTable(client: Socket, payload: {
-        tableId: string;
+    MAX_RETRIES: number;
+    RETRY_DELAY_MS: number;
+    private pendingMessages;
+    handlePlayCard(client: Socket, payload: {
+        value: number;
+        suit: string;
     }): void;
-    handlePlayCard(client: Socket, payload: PlayCardPayload): Promise<void>;
+    private sendCardPlayed;
 }
-export {};
