@@ -11,12 +11,9 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.EventsGateway = void 0;
 const websockets_1 = require("@nestjs/websockets");
-const common_1 = require("@nestjs/common");
 const socket_io_1 = require("socket.io");
 let EventsGateway = class EventsGateway {
     constructor() {
-        this.logger = new common_1.Logger("EventsGateway");
-        this.tablePlayers = new Map();
         this.MAX_RETRIES = 3;
         this.RETRY_DELAY_MS = 500;
         this.pendingMessages = new Map();
@@ -26,9 +23,6 @@ let EventsGateway = class EventsGateway {
     }
     handleDisconnect(client) {
         console.log(`Client disconnected: ${client.id}`);
-        this.tablePlayers.forEach((players, tableId) => {
-            players.delete(client);
-        });
     }
     handlePlayCard(client, payload) {
         console.log(`Player ${client.id} played card: ${payload.suit} - ${payload.value}`);

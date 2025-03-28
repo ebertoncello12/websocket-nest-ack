@@ -1,12 +1,10 @@
 import {
-  WebSocketGateway,
-  WebSocketServer,
   OnGatewayConnection,
   OnGatewayDisconnect,
-  OnGatewayInit,
   SubscribeMessage,
+  WebSocketGateway,
+  WebSocketServer,
 } from "@nestjs/websockets";
-import { Logger } from "@nestjs/common";
 import { Server, Socket } from "socket.io";
 
 type CardPayload = { value: number; suit: string };
@@ -24,9 +22,6 @@ interface PendingMessage {
   },
 })
 export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
-  private logger: Logger = new Logger("EventsGateway");
-  private tablePlayers: Map<string, Set<Socket>> = new Map();
-
   @WebSocketServer() server: Server;
 
   handleConnection(client: Socket, ...args: any[]) {
@@ -35,9 +30,6 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   handleDisconnect(client: Socket) {
     console.log(`Client disconnected: ${client.id}`);
-    this.tablePlayers.forEach((players, tableId) => {
-      players.delete(client);
-    });
   }
 
   MAX_RETRIES = 3;
